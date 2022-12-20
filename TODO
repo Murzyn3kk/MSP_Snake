@@ -1,0 +1,16 @@
+- gra
+	- zdefiniowanie znakow na LCD
+	- mapa
+	- snake
+	- bariery / przeszkody
+	- zarcie
+	- detekcja kolizji
+	- buforowanie
+- wyniki
+	- system naliczania punktow
+	- zapisywanie
+- tryby gry
+	- dodatkowe przeszkody / zarcie
+	- predkosc gry
+	- przyspieszenie
+	- borderless
