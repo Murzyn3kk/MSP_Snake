@@ -1,8 +1,8 @@
 #include <msp430x14x.h>
 #include "portyLcd.h"
 #include "lcd.h"
-//#include <cstdlib>      // srand(), rand()
-//#include <ctime>        // time()
+#include <cstdlib>      // srand(), rand()
+#include <ctime>        // time()
 
 // ---- Przyciski ---------------------------------------------
 #define BUTTON_1                !(P4IN&0x10)
@@ -21,7 +21,7 @@
 #define BLANK                   32
 
 // ---- Predkosci gry -----------------------------------------
-#define GAME_SPEED_MENU         25
+#define GAME_SPEED_MENU         10
 #define GAME_SPEED_1            50
 #define GAME_SPEED_2            25
 #define GAME_SPEED_3            10
@@ -29,14 +29,7 @@
 // ---- Definicje pomocnicze ----------------------------------
 #define LINE_1                  0x80
 #define LINE_2                  0xc0
-#define NULL                    0
-
-// ---- Zmienne globalne --------------------------------------
-int input;
-int counter;
-int game_speed;
-int bufor[16][4];
-int ktory_przycisk = 0;
+//#define NULL                    0
 
 // ---- Deklaracje zmiennych ----------------------------------
 struct Snake_segment
@@ -53,6 +46,7 @@ class Snake
 {
 public:
   Snake();
+  ~Snake();
 
   void display();
   void move(Snake_segment* current);
@@ -62,9 +56,29 @@ public:
   Snake_segment* head;
 };
 
+struct Highscore
+{
+  char* name;
+  int score;
+};
+
+// ---- Zmienne globalne --------------------------------------
+int input;
+int time_elapsed;
+int game_speed;
+int bufor[16][4];
+int apple_x;
+int apple_y;
+char* h1name;
+char* h2name;
+int h1score;
+int h2score;
+Highscore highscore[2];
+
 // ---- Deklaracje funkcji ------------------------------------
-void Send_String(const char* string, unsigned char line);
+void Send_String(char* string, unsigned char line);
 void Send_String_XY(const char* string, int x, int y);
+void Send_Int(int value);
 
 void CreateCustomCharacters();  // utworzenie znakow specjalnych
 
@@ -77,6 +91,8 @@ int game_update(Snake*);        // aktualizacja stanu gry
 void game_display(Snake*);      // wyswietlanie gry
 
 int highscores(int);            // petla glowna wynikow
+void edit_highscore(int position);
+void highscores_add(int& score);// dodanie nowego wyniku
 int highscores_update(int&);    // aktualizacja stanu wynikow
 void highscores_display();      // wyswietlanie wynikow
 
@@ -84,30 +100,40 @@ void highscores_display();      // wyswietlanie wynikow
 void main()
 {
   WDTCTL = WDTPW + WDTHOLD;
-  //srand(time(NULL));
+  srand(time(NULL));
   P4DIR = ~0xf0;                 // przyciski
   InitPortsLcd();
   InitLCD();
   clearDisplay();
 
   BCSCTL1 |= XTS;               // ACLK = LFXT1 = HF XTAL 8MHz
-  do 
+  do
   {
     IFG1 &= ~OFIFG;                     // Czyszczenie flgi OSCFault
     for (int i = 0xFF; i > 0; i--);     // odczekanie
   }while ((IFG1 & OFIFG) == OFIFG);     // dopoki OSCFault jest ciagle ustawiona
-  
   BCSCTL1 |= DIVA_1;                    // ACLK = 8 MHz/2 = 4MHz
   BCSCTL2 |= SELM0 | SELM1;             // MCLK = LFTX1 = ACLK
   TACTL = TASSEL_1 + MC_1 + ID_3;       // Wybieram ACLK, tryb Up, ACLK/8 = 500kHz
   CCTL0 = CCIE;                         // wlaczenie przerwan od CCR0
-  CCR0 = 50000;                         // Przerwanie generowane co 20 ms
+  CCR0 = 10000;                         // Przerwanie generowane co 20 ms
   _EINT();                              // Wlaczenie przerwan
+
+  highscore[0].name = new char[9];
+  highscore[1].name = new char[9];
+  for(int i = 0; i < 8; i++)
+  {
+    highscore[0].name[i] = 65;
+    highscore[1].name[i] = 66;
+  }
+  highscore[0].name[8] = '?';
+  highscore[1].name[8] = '?';
+  highscore[0].score = 1234;
+  highscore[1].score = 7;
 
   game_speed = GAME_SPEED_MENU;
   CreateCustomCharacters();
   int app_state;
-
   while(1)
   {
     app_state = menu();
@@ -126,7 +152,7 @@ void main()
 }
 
 // ---- Funkcje pomocnicze ------------------------------------
-void Send_String(const char* string, unsigned char line)
+void Send_String(char* string, unsigned char line)
 {
   SEND_CMD(line);
 
@@ -146,6 +172,32 @@ void Send_String_XY(const char* string, int x, int y)
 
   while(*string != '?')
     SEND_CHAR(*string++);
+}
+
+void Send_Int(int value)
+{
+  int position;
+  char chars[4] = {0};
+  if(value > 999)
+    position = 0;
+  else if(value > 99)
+    position = 1;
+  else if(value > 9)
+    position = 2;
+  else
+    position = 3;
+
+  for(int i = 0; i < 4; ++i)
+    if(i < position)
+      chars[i] = 32;
+    else
+    {
+      chars[i] = value % 10;
+      value = value / 10;
+    }
+
+  for(int i = 4; i < 0; --i)
+    SEND_CHAR(chars[i]);
 }
 
 // ---- Inicjacja aplikacji -----------------------------------
@@ -177,13 +229,15 @@ int menu()                                      // petla glowna menu
   game_speed = GAME_SPEED_MENU;
   int loop = 0;
 
+  input = 0;
+  _BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
   while(!loop)
   {
     loop = menu_update();
     menu_display();
 
-    //input = 0;
-    //_BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
+    input = 0;
+    _BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
   }
 
   return loop;
@@ -191,21 +245,8 @@ int menu()                                      // petla glowna menu
 
 int menu_update()                               // aktualizacja stanu menu
 {
-  if(BUTTON_1)
-    return 1;
-  if(BUTTON_2)
-    return 2;
-
-  return input;
-  switch(input)
-  {
-  case 1:
-    return 1;
-    break;
-  case 2:
-    return 2;
-    break;
-  }
+  if(input)
+    return input;
 
   return 0;
 }
@@ -226,6 +267,18 @@ Snake::Snake()
 
   y_direction = 0;
   x_direction = 1;
+}
+
+Snake::~Snake()
+{
+  Snake_segment* current = head;
+  while(current->next)
+  {
+    Snake_segment* tmp = current->next;
+    delete current;
+    current = tmp;
+  }
+  delete current;
 }
 
 void Snake::display()                // wyswietlanie weza
@@ -254,25 +307,22 @@ int game()                                      // petla glowna gry
   int loop = 0;
 
   Snake* snake = new Snake();
+  apple_x = 7;
+  apple_y = 2;
 
   input = 0;
   while(!loop)
   {
     loop = game_update(snake);
     game_display(snake);
-    while(1)
-    {
-        if(counter%15 == 0)
-        {
-                counter = 0;
-                break;
-        }
-    }
-    //input = 0;
-    //_BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
+
+    input = 0;
+    _BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
   }
 
   // highscores(score);
+
+  delete snake;
 
   return loop;
 }
@@ -280,38 +330,37 @@ int game()                                      // petla glowna gry
 int game_update(Snake* snake)                   // aktualizacja stanu gry
 {
   // przetwarzanie inputu
-    if(ktory_przycisk == 1)
+  switch(input)
+  {
+  case 1:       // button 1
     if(snake->x_direction == 0)
     {
       snake->x_direction = -1;
       snake->y_direction = 0;
     }
-    //break;
-  //case 2:       // button 2
-    if(ktory_przycisk == 2)
+    break;
+  case 2:       // button 2
     if(snake->x_direction == 0)
     {
       snake->x_direction = 1;
       snake->y_direction = 0;
     }
-    //break;
-  //case 3:       // button 3
-    if(ktory_przycisk == 3)
+    break;
+  case 3:       // button 3
     if(snake->y_direction == 0)
     {
       snake->x_direction = 0;
       snake->y_direction = -1;
     }
-    //break;
-  //case 4:       // button 4
-    if(ktory_przycisk == 4)
+    break;
+  case 4:       // button 4
     if(snake->y_direction == 0)
     {
       snake->x_direction = 0;
       snake->y_direction = 1;
     }
-    //break;
-  //}
+    break;
+  }
 
   // sprawdzanie kolizji ze sciana
   int next_head_pos_x = snake->head->x + snake->x_direction;
@@ -331,6 +380,39 @@ int game_update(Snake* snake)                   // aktualizacja stanu gry
     current = current->next;
   }
 
+  // sprawdzanie kolizji z jedzeniem
+  if(next_head_pos_x == apple_x && next_head_pos_y == apple_y)
+  {
+    // generowanie nowego jablka
+    while(1)
+    {
+      int new_apple_x = rand() % 16;
+      int new_apple_y = rand() % 4;
+
+      Snake_segment* current = snake->head;
+      while(current)
+      {
+        if(next_head_pos_x == new_apple_x && next_head_pos_y == new_apple_y)
+          break;
+        if(new_apple_x == current->x && new_apple_y == current->y)
+          break;
+        current = current->next;
+      }
+      if(current == NULL)
+      {
+        apple_x = new_apple_x;
+        apple_y = new_apple_y;
+        break;
+      }
+    }
+
+    // dodanie segmentu do weza
+    Snake_segment* current = snake->head;
+    while(current->next)
+      current = current->next;
+    current->next = new Snake_segment(0,0);
+  }
+
   // aktualizacja pozycji weza
   snake->move(snake->head);
 
@@ -344,20 +426,15 @@ void game_display(Snake* snake)                 // wyswietlanie gry
 {
   clearDisplay();
 
-  //char** bufor = new char*[16];
   for(int i = 0; i < 16; i++)
-  {
-    //bufor[i] = new char[4];
     for(int j = 0; j < 4; j++)
       bufor[i][j] = 0;
-  }
 
   snake->display();
-  // display food
+  bufor[apple_x][apple_y] = 2;
 
   // konwersja bufora na znaki
   SEND_CMD(LINE_1);
-  SEND_CMD(CUR_HOME);
   for(int i = 0; i < 16; i++)
   {
     if(bufor[i][0] == 0 && bufor[i][1] == 0)
@@ -397,10 +474,6 @@ void game_display(Snake* snake)                 // wyswietlanie gry
     else
       SEND_CHAR(SNAKE_DOWN_APPLE_UP);
   }
-
-  //for(int i = 0; i < 16; i++)
-    //delete[] bufor[i];
-  //delete[] bufor;
 }
 
 // ---- Wyniki ------------------------------------------------
@@ -409,6 +482,11 @@ int highscores(int score)                       // petla glowna wynikow
   game_speed = GAME_SPEED_MENU;
   int loop = 0;
 
+  if(score)
+    highscores_add(score);
+
+  input = 0;
+  _BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
   while(!loop)
   {
     loop = highscores_update(score);
@@ -421,8 +499,70 @@ int highscores(int score)                       // petla glowna wynikow
   return loop;
 }
 
+void edit_highscore(int position)
+{
+  int cur_pos = 0;
+  char character = 65;
+  while(1)
+  {
+    switch(input)
+    {
+      case 1:
+        highscore[position].name[cur_pos]--;
+        if(highscore[position].name[cur_pos] == 64)
+          highscore[position].name[cur_pos] = 32;
+        if(highscore[position].name[cur_pos] == 31)
+          highscore[position].name[cur_pos] = 90;
+        break;
+      case 2:
+        highscore[position].name[cur_pos]++;
+        if(highscore[position].name[cur_pos] == 91)
+          highscore[position].name[cur_pos] = 32;
+         if(highscore[position].name[cur_pos] == 33)
+          highscore[position].name[cur_pos] = 65;
+        break;
+      case 3:
+        cur_pos--;
+        if(cur_pos == -1)
+          return;
+        break;
+      case 4:
+        cur_pos++;
+        if(cur_pos == 8)
+          return;
+        break;
+    }
+    clearDisplay();
+    Send_String(highscore[position].name , LINE_1);
+
+    input = 0;
+    _BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
+  }
+}
+
+void highscores_add(int& score)
+{
+  if(score > highscore[1].score)
+  {
+    if(score > highscore[0].score)
+    {
+      highscore[1].score = highscore[0].score;
+      highscore[1].name = highscore[0].name;
+      highscore[0].score = score;
+      edit_highscore(0);
+    }
+    else
+    {
+      highscore[1].score = score;
+      edit_highscore(1);
+    }
+  }
+}
+
 int highscores_update(int& score)               // aktualizacja stanu wynikow
 {
+  if(input)
+    return input;
 
   return 0;
 }
@@ -430,22 +570,32 @@ int highscores_update(int& score)               // aktualizacja stanu wynikow
 void highscores_display()                       // wyswietlanie wynikow
 {
   clearDisplay();
+
+  Send_String(highscore[0].name , LINE_1);
+  SEND_CHAR(32);
+  Send_Int(highscores[1].score);
+
+  Send_String(highscore[1].name , LINE_2);
+  SEND_CHAR(32);
+  Send_Int(highscores[1].score);
 }
 
 // ---- Timer -------------------------------------------------
 #pragma vector=TIMERA0_VECTOR
 __interrupt void Timer_A(void)
 {
-  if((BUTTON_1)==1)
-    ktory_przycisk = 1;
-  else if((BUTTON_2)==1)
-    ktory_przycisk = 2;
-   else if((BUTTON_3)==1)
-    ktory_przycisk = 3;
-   else if((BUTTON_4)==1)
-    ktory_przycisk = 4;
-   else
-     ktory_przycisk = 404;
-  ++counter;
-  _BIC_SR_IRQ(LPM3_bits); // wyjscie z trybu oszczednego
+  if (BUTTON_1)
+    input = 1;
+  else if (BUTTON_2)
+    input = 2;
+  else if (BUTTON_3)
+    input = 3;
+  else if (BUTTON_4)
+    input = 4;
+
+  if(++time_elapsed >= game_speed)
+  {
+    time_elapsed = 0;
+    _BIC_SR_IRQ(LPM3_bits); // wyjscie z trybu oszczednego
+  }
 }

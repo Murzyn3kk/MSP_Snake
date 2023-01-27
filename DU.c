@@ -33,7 +33,7 @@
 
 // ---- Zmienne globalne --------------------------------------
 int input;
-int counter;
+int time_elapsed;
 int game_speed;
 int bufor[16][4];
 int apple_x;
@@ -67,24 +67,31 @@ public:
 // ---- Deklaracje funkcji ------------------------------------
 void Send_String(const char* string, unsigned char line);
 void Send_String_XY(const char* string, int x, int y);
+void Send_Int_As_String(int);
 
 void CreateCustomCharacters();  // utworzenie znakow specjalnych
 
 int menu();                     // petla glowna menu
 int menu_update();              // aktualizacja stanu menu
 void menu_display();            // wyswietlanie menu
+void initial_menu_display();    // wyswietlanie pierwszego menu
 
 int game();                     // petla glowna gry
 int game_update(Snake*);        // aktualizacja stanu gry
 void game_display(Snake*);      // wyswietlanie gry
 
+
 int highscores(int);            // petla glowna wynikow
 int highscores_update(int&);    // aktualizacja stanu wynikow
 void highscores_display();      // wyswietlanie wynikow
 
+void show_authors();
+void show_control();
+
 // ---- main() ------------------------------------------------
 void main()
 {
+
   WDTCTL = WDTPW + WDTHOLD;
   srand(time(NULL));
   P4DIR = ~0xf0;                 // przyciski
@@ -92,7 +99,7 @@ void main()
   InitLCD();
   clearDisplay();
 
-  /*
+  
   BCSCTL1 |= XTS;               // ACLK = LFXT1 = HF XTAL 8MHz
   do
   {
@@ -105,12 +112,16 @@ void main()
   CCTL0 = CCIE;                         // wlaczenie przerwan od CCR0
   CCR0 = 10000;                         // Przerwanie generowane co 20 ms
   _EINT();                              // Wlaczenie przerwan
-  */
+  
 
   game_speed = GAME_SPEED_MENU;
   CreateCustomCharacters();
   int app_state;
-
+  
+  initial_menu_display();
+  while(input == 0)
+    _BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
+  
   while(1)
   {
     app_state = menu();
@@ -121,6 +132,12 @@ void main()
       break;
     case 2:
       highscores(0);
+      break;
+    case 3:
+      show_control();
+      break;
+    case 4:
+      show_authors();
       break;
     default:
       break;
@@ -149,6 +166,14 @@ void Send_String_XY(const char* string, int x, int y)
 
   while(*string != '?')
     SEND_CHAR(*string++);
+}
+
+void Send_Int_As_String(int value)
+{
+  char liczba[] = {' ', ' ', ' ', ' '};
+  int ile_cyfr;
+  if (value > 
+  
 }
 
 // ---- Inicjacja aplikacji -----------------------------------
@@ -180,13 +205,16 @@ int menu()                                      // petla glowna menu
   game_speed = GAME_SPEED_MENU;
   int loop = 0;
 
+  menu_display();
+  _BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
+  input = 0;
   while(!loop)
   {
     loop = menu_update();
-    menu_display();
+    
 
-    //input = 0;
-    //_BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
+    input = 0;
+    _BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
   }
 
   return loop;
@@ -194,30 +222,27 @@ int menu()                                      // petla glowna menu
 
 int menu_update()                               // aktualizacja stanu menu
 {
-  if(BUTTON_1)
-    return 1;
-  if(BUTTON_2)
-    return 2;
-
-  return input;
-  switch(input)
-  {
-  case 1:
-    return 1;
-    break;
-  case 2:
-    return 2;
-    break;
-  }
-
+  
+  if(input)
+    return input;
+    
+  SEND_CMD(DATA_ROL_LEFT); //przewijanie tekstu w prawo
+    
   return 0;
 }
-
+void initial_menu_display()
+{
+  clearDisplay();
+  Send_String("      Snake?", LINE_1);
+  Send_String("Wcisnij 1?", LINE_2);
+}
 void menu_display()                             // wyswietlanie menu
 {
   clearDisplay();
 
-  Send_String("Menu?", LINE_1);
+  Send_String("1 - Graj 2 - Highscores?", LINE_1);
+  Send_String("3 - Sterowanie 4 - Autorzy?", LINE_2);
+  
 }
 
 // ---- Snake -------------------------------------------------
@@ -277,9 +302,11 @@ int game()                                      // petla glowna gry
   {
     loop = game_update(snake);
     game_display(snake);
+    
+    //Delayx100us(200);
 
-    //input = 0;
-    //_BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
+    input = 0;
+    _BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
   }
 
   // highscores(score);
@@ -292,45 +319,38 @@ int game()                                      // petla glowna gry
 int game_update(Snake* snake)                   // aktualizacja stanu gry
 {
   // przetwarzanie inputu
-  //switch(input)
-  //{
-  //case 1:       // button 1
-    if(BUTTON_1)
+  switch(input)
+  {
+  case 1:       // button 1
+    
     if(snake->x_direction == 0)
     {
       snake->x_direction = -1;
       snake->y_direction = 0;
-      while(BUTTON_1);
     }
-    //break;
-  //case 2:       // button 2
-    if(BUTTON_2)
+    break;
+  case 2:       // button 2
     if(snake->x_direction == 0)
     {
       snake->x_direction = 1;
       snake->y_direction = 0;
-      while(BUTTON_2);
     }
-    //break;
-  //case 3:       // button 3
-    if(BUTTON_3)
+    break;
+  case 3:       // button 3
     if(snake->y_direction == 0)
     {
       snake->x_direction = 0;
       snake->y_direction = -1;
-      while(BUTTON_3);
     }
-    //break;
-  //case 4:       // button 4
-    if(BUTTON_4)
+    break;
+  case 4:       // button 4
     if(snake->y_direction == 0)
     {
       snake->x_direction = 0;
       snake->y_direction = 1;
-      while(BUTTON_4);
     }
-    //break;
-  //}
+    break;
+  }
 
   // sprawdzanie kolizji ze sciana
   int next_head_pos_x = snake->head->x + snake->x_direction;
@@ -409,7 +429,7 @@ void game_display(Snake* snake)                 // wyswietlanie gry
 
   // konwersja bufora na znaki
   SEND_CMD(CUR_HOME);
-  SEND_CMD(LINE_1);
+  //SEND_CMD(LINE_1);
   for(int i = 0; i < 16; i++)
   {
     if(bufor[i][0] == 0 && bufor[i][1] == 0)
@@ -484,22 +504,50 @@ void highscores_display()                       // wyswietlanie wynikow
   clearDisplay();
 }
 
+// ---- Autorzy ------------------------------------------------
+void show_authors()
+{
+  clearDisplay();
+  Send_String("Michal Szypluk Dawid Ugniewski?", LINE_1);
+  Send_String("Albert Stefanowski Ola Didluch?", LINE_2);
+  for(int i = 0; i < 58; ++i)
+  {
+    SEND_CMD(DATA_ROL_LEFT); //przewijanie tekstu w prawo
+    _BIS_SR(LPM3_bits);          // wejscie w tryb oszczedny
+    if(input == 1 || input == 2 || input== 3 || input == 4)
+      break;
+  }
+}
+// ---- Sterowanie ------------------------------------------------
+void show_control()
+{
+  clearDisplay();
+  Send_String("1:Lewo 2:Prawo?", LINE_1);
+  Send_String("3:Gora 4:Dol?", LINE_2);
+  while(input != 1 && input != 2 && input!= 3 && input != 4)
+  {}
+    //for(long int j=0; j<100000; ++j)
+    //{}
+}
+
 // ---- Timer -------------------------------------------------
 #pragma vector=TIMERA0_VECTOR
 __interrupt void Timer_A(void)
 {
-  //if (BUTTON_1)
-    //input = 1;
-  //else if (BUTTON_2)
-    //input = 2;
-  //else if (BUTTON_3)
-    //input = 3;
-  //else if (BUTTON_4)
-    //input = 4;
-
-  if(++counter == game_speed)
+  if (BUTTON_1)
   {
-    counter = 0;
+    input = 1;
+  }
+else if (BUTTON_2)
+    input = 2;
+  else if (BUTTON_3)
+    input = 3;
+  else if (BUTTON_4)
+    input = 4;
+
+  if(++time_elapsed >= game_speed)
+  {
+    time_elapsed = 0;
     _BIC_SR_IRQ(LPM3_bits); // wyjscie z trybu oszczednego
   }
 }
